@@ -66,7 +66,9 @@ class Peers:
         for seed in self.seed_list:
             self.connect_to_seed(seed)
         self.request_peer_lists()
-        # connect_to_peers and send_connection_update will be added next
+        self.connect_to_peers()
+        self.send_connection_update()
+
 
     def connect_to_seed(self, seed):
         try:
@@ -113,7 +115,6 @@ class Peers:
         log(msg)
 
     def accept_connections(self):
-        # Placeholder — full listener added in next commit
         while self.running_status and not self.isDead:
             try:
                 connection, address = self.server_socket.accept()
@@ -121,9 +122,15 @@ class Peers:
                 print(msg)
                 log(msg)
                 self.peer_connections.append(connection)
+                thread = threading.Thread(
+                    target=self.peer_listener,
+                    args=(connection, "", True),
+                    daemon=True
+                )
+                thread.start()
             except Exception as e:
                 if self.running_status:
-                    print(f"Peer(server)({self.ip}:{self.port}) -> Error accepting: {e}")
+                    print(f"Peer(server)({self.ip}:{self.port}) -> Error accepting connection: {e}")
                 break
 
     def close(self):
@@ -138,67 +145,113 @@ class Peers:
             print(msg)
             log(msg)
 
-
-            
-
-def connect(self, seeds):
-        if len(seeds) > 0:
-            self.seed_list = random.sample(seeds, (len(seeds) // 2) + 1)
-        for seed in self.seed_list:
-            self.connect_to_seed(seed)
-        self.request_peer_lists()
-        self.connect_to_peers()
-        self.send_connection_update()
-
-def connect_to_peers(self):
-    for peer in set(self.peer_list):
-        peer_ip, peer_port, peer_degree = peer
-        if peer_ip == self.ip and peer_port == self.port:
-            continue
-        threshold = 1 / (peer_degree + 1)
-        rand_val = random.random()
-        msg = f"Evaluating {peer_ip}:{peer_port} degree={peer_degree} threshold={threshold:.4f} rand={rand_val:.4f}"
-        print(msg)
-        log(msg)
-        if len(self.peer_list) == 1:
-            threshold = 0
-        if rand_val > threshold:
-            try:
-                peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                peer_socket.connect((peer_ip, peer_port))
-                self.peer_connections.append(peer_socket)
-                peer_socket.sendall(f"NEW_PEER_SERVER:{self.port}\n".encode('utf-8'))
-                self.peer_info[peer_socket] = (peer_ip, peer_port)
-                msg = f"Peer(client)({self.ip}:{self.port}) -> Connected to peer {peer_ip}:{peer_port}"
-                print(msg)
-                log(msg)
-                thread = threading.Thread(
-                    target=self.peer_listener,
-                    args=(peer_socket, "", False),
-                    daemon=True
-                )
-                thread.start()
-            except socket.error as e:
-                print(f"Peer(client)({self.ip}:{self.port}) -> Failed to connect to {peer_ip}:{peer_port}. Error: {e}")
-
-def send_connection_update(self):
-    connected_peers = []
-    for peer_socket in self.peer_connections:
-        try:
-            peer_addr = peer_socket.getpeername()
-            connected_peers.append(f"{peer_addr[0]}:{peer_addr[1]}")
-        except Exception:
-            continue
-    new_degree = len(self.peer_connections)
-    update_msg = f"CONNECTION_UPDATE:{self.ip}:{self.port}:{new_degree}:"
-    if connected_peers:
-        update_msg += ",".join(connected_peers)
-    update_msg += "\n"
-    for seed_socket in self.seed_connections:
-        try:
-            seed_socket.sendall(update_msg.encode('utf-8'))
-            msg = f"Peer(client)({self.ip}:{self.port}) -> Sent connection update to seed"
+    def connect_to_peers(self):
+        for peer in set(self.peer_list):
+            peer_ip, peer_port, peer_degree = peer
+            if peer_ip == self.ip and peer_port == self.port:
+                continue
+            threshold = 1 / (peer_degree + 1)
+            rand_val = random.random()
+            msg = f"Evaluating {peer_ip}:{peer_port} degree={peer_degree} threshold={threshold:.4f} rand={rand_val:.4f}"
             print(msg)
             log(msg)
-        except Exception as e:
-            print(f"Peer(client)({self.ip}:{self.port}) -> Failed to send connection update: {e}")
+            if len(self.peer_list) == 1:
+                threshold = 0
+            if rand_val > threshold:
+                try:
+                    peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    peer_socket.connect((peer_ip, peer_port))
+                    self.peer_connections.append(peer_socket)
+                    peer_socket.sendall(f"NEW_PEER_SERVER:{self.port}\n".encode('utf-8'))
+                    self.peer_info[peer_socket] = (peer_ip, peer_port)
+                    msg = f"Peer(client)({self.ip}:{self.port}) -> Connected to peer {peer_ip}:{peer_port}"
+                    print(msg)
+                    log(msg)
+                    thread = threading.Thread(
+                        target=self.peer_listener,
+                        args=(peer_socket, "", False),
+                        daemon=True
+                    )
+                    thread.start()
+                except socket.error as e:
+                    print(f"Peer(client)({self.ip}:{self.port}) -> Failed to connect to {peer_ip}:{peer_port}. Error: {e}")
+
+    def send_connection_update(self):
+        connected_peers = []
+        for peer_socket in self.peer_connections:
+            try:
+                peer_addr = peer_socket.getpeername()
+                connected_peers.append(f"{peer_addr[0]}:{peer_addr[1]}")
+            except Exception:
+                continue
+        new_degree = len(self.peer_connections)
+        update_msg = f"CONNECTION_UPDATE:{self.ip}:{self.port}:{new_degree}:"
+        if connected_peers:
+            update_msg += ",".join(connected_peers)
+        update_msg += "\n"
+        for seed_socket in self.seed_connections:
+            try:
+                seed_socket.sendall(update_msg.encode('utf-8'))
+                msg = f"Peer(client)({self.ip}:{self.port}) -> Sent connection update to seed"
+                print(msg)
+                log(msg)
+            except Exception as e:
+                print(f"Peer(client)({self.ip}:{self.port}) -> Failed to send connection update: {e}")
+
+    def peer_listener(self, peer: socket.socket, buffer: str, handshake_required: bool = True):
+        handshake_done = not handshake_required
+        while self.running_status and not self.isDead:
+            try:
+                data = peer.recv(1024)
+            except Exception as e:
+                err_msg = f"Error receiving data: {e}"
+                print(err_msg)
+                log(err_msg)
+                break
+            if not data:
+                break
+            buffer += data.decode('utf-8')
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                if not line:
+                    continue
+                if not handshake_done:
+                    if line.startswith("PEER_SERVER:") or line.startswith("NEW_PEER_SERVER:"):
+                        try:
+                            remote_port = int(line.split(":")[1])
+                            remote_ip = peer.getpeername()[0]
+                            self.peer_info[peer] = (remote_ip, remote_port)
+                            handshake_done = True
+                            msg = f"Handshake complete with peer {remote_ip}:{remote_port}"
+                            print(msg)
+                            log(msg)
+                        except ValueError:
+                            log(f"Invalid handshake message: {line}")
+                    else:
+                        log(f"Expected handshake but received: {line}")
+                else:
+                    msg = f"Received: {line}"
+                    print(msg)
+                    log(msg)
+                    if line.startswith("PING"):
+                        peer.sendall("PONG\n".encode('utf-8'))
+                        log(f"Sent PONG to {self.peer_info.get(peer, peer.getpeername())}")
+                    elif line.startswith("PONG"):
+                        self.ping_tracker[peer] = [time.time(), 0]
+                        log(f"Received PONG from {self.peer_info.get(peer, peer.getpeername())}")
+                    elif line.startswith("GOSSIP:"):
+                        try:
+                            message_hash = int(line.split("GOSSIP:")[1])
+                        except ValueError:
+                            log(f"Failed to parse message hash: {line}")
+                            continue
+                        if message_hash not in self.message_hashes:
+                            self.message_hashes.add(message_hash)
+                            for peer_socket in list(self.peer_connections):
+                                if peer_socket != peer:
+                                    thread = threading.Thread(
+                                        target=self.gossip_sender_peer,
+                                        args=(peer_socket, message_hash),
+                                        daemon=True
+                                    )
+                                    thread.start()
