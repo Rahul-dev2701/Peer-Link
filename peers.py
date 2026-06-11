@@ -68,6 +68,9 @@ class Peers:
         self.request_peer_lists()
         self.connect_to_peers()
         self.send_connection_update()
+        if not self.isDead:
+            thread_sender = threading.Thread(target=self.gossip_sender_all, daemon=True)
+            thread_sender.start()
 
 
     def connect_to_seed(self, seed):
@@ -255,3 +258,30 @@ class Peers:
                                         daemon=True
                                     )
                                     thread.start()
+
+def gossip_sender_all(self):
+        for i in range(NUM_MESSAGES):
+            if not self.running_status or self.isDead:
+                break
+            message = f"{time.strftime('%H:%M:%S')}:{self.ip}:{self.port}:m"
+            message_hash = hash(message)
+            if message_hash not in self.message_hashes:
+                log(f"Peer {self.ip}:{self.port} -> Sending gossip hash for first time: {message}")
+                self.message_hashes.add(message_hash)
+                for peer in list(self.peer_connections):
+                    thread = threading.Thread(
+                        target=self.gossip_sender_peer,
+                        args=(peer, message_hash),
+                        daemon=True
+                    )
+                    thread.start()
+            time.sleep(GOSSIP_SEND_INTERVAL)
+
+def gossip_sender_peer(self, peer: socket.socket, message_hash: int):
+    try:
+        peer.sendall(f"GOSSIP:{message_hash}\n".encode('utf-8'))
+        msg = f"Peer({self.ip}:{self.port}) -> Sent GOSSIP:{message_hash}"
+        print(msg)
+    except Exception as e:
+        if self.running_status:
+            print(f"Peer({self.ip}:{self.port}) -> Error sending gossip: {e}")
