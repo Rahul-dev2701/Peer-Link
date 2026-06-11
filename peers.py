@@ -137,3 +137,68 @@ class Peers:
             msg = f"Peer on {self.ip}:{self.port} closed."
             print(msg)
             log(msg)
+
+
+            
+
+def connect(self, seeds):
+        if len(seeds) > 0:
+            self.seed_list = random.sample(seeds, (len(seeds) // 2) + 1)
+        for seed in self.seed_list:
+            self.connect_to_seed(seed)
+        self.request_peer_lists()
+        self.connect_to_peers()
+        self.send_connection_update()
+
+def connect_to_peers(self):
+    for peer in set(self.peer_list):
+        peer_ip, peer_port, peer_degree = peer
+        if peer_ip == self.ip and peer_port == self.port:
+            continue
+        threshold = 1 / (peer_degree + 1)
+        rand_val = random.random()
+        msg = f"Evaluating {peer_ip}:{peer_port} degree={peer_degree} threshold={threshold:.4f} rand={rand_val:.4f}"
+        print(msg)
+        log(msg)
+        if len(self.peer_list) == 1:
+            threshold = 0
+        if rand_val > threshold:
+            try:
+                peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                peer_socket.connect((peer_ip, peer_port))
+                self.peer_connections.append(peer_socket)
+                peer_socket.sendall(f"NEW_PEER_SERVER:{self.port}\n".encode('utf-8'))
+                self.peer_info[peer_socket] = (peer_ip, peer_port)
+                msg = f"Peer(client)({self.ip}:{self.port}) -> Connected to peer {peer_ip}:{peer_port}"
+                print(msg)
+                log(msg)
+                thread = threading.Thread(
+                    target=self.peer_listener,
+                    args=(peer_socket, "", False),
+                    daemon=True
+                )
+                thread.start()
+            except socket.error as e:
+                print(f"Peer(client)({self.ip}:{self.port}) -> Failed to connect to {peer_ip}:{peer_port}. Error: {e}")
+
+def send_connection_update(self):
+    connected_peers = []
+    for peer_socket in self.peer_connections:
+        try:
+            peer_addr = peer_socket.getpeername()
+            connected_peers.append(f"{peer_addr[0]}:{peer_addr[1]}")
+        except Exception:
+            continue
+    new_degree = len(self.peer_connections)
+    update_msg = f"CONNECTION_UPDATE:{self.ip}:{self.port}:{new_degree}:"
+    if connected_peers:
+        update_msg += ",".join(connected_peers)
+    update_msg += "\n"
+    for seed_socket in self.seed_connections:
+        try:
+            seed_socket.sendall(update_msg.encode('utf-8'))
+            msg = f"Peer(client)({self.ip}:{self.port}) -> Sent connection update to seed"
+            print(msg)
+            log(msg)
+        except Exception as e:
+            print(f"Peer(client)({self.ip}:{self.port}) -> Failed to send connection update: {e}")
