@@ -68,6 +68,8 @@ class Peers:
         self.request_peer_lists()
         self.connect_to_peers()
         self.send_connection_update()
+        thread_death = threading.Thread(target=self.simulate_death, daemon=True)
+        thread_death.start()
         if not self.isDead:
             thread_ping_sender = threading.Thread(target=self.ping_sender, daemon=True)
             thread_ping_sender.start()
@@ -292,7 +294,7 @@ def ping_sender(self):
                 self.ping_sender_peer(peer_socket)
             time.sleep(PING_INTERVAL)
 
-            
+
 def ping_sender_peer(self, peer_socket: socket.socket):
         if self.isDead or not self.running_status:
             return
@@ -343,3 +345,17 @@ def ping_sender_peer(self, peer_socket: socket.socket):
                     peer_socket.close()
                 except Exception:
                     pass
+
+
+def simulate_death(self):
+        chance_to_die = 0.3
+        if random.random() < chance_to_die:
+            death_time = random.uniform(30, 60)
+            time.sleep(death_time)
+            self.isDead = True
+            msg = f"Peer {self.ip}:{self.port} has died (simulated)."
+            print(msg)
+            log(msg)
+        else:
+            msg = f"Peer {self.ip}:{self.port} remains alive (simulation)."
+            print(msg)
