@@ -42,6 +42,7 @@ class Peers:
         self.isDead = False
         self.ping_tracker = {}
         self.peer_info = {}
+        self._lock = threading.Lock()
 
     def creation(self):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -126,7 +127,8 @@ class Peers:
                 msg = f"Peer(server)({self.ip}:{self.port}) -> New connection from {address[0]}:{address[1]}"
                 print(msg)
                 log(msg)
-                self.peer_connections.append(connection)
+                with self._lock:
+                    self.peer_connections.append(connection)
                 thread = threading.Thread(
                     target=self.peer_listener,
                     args=(connection, "", True),
@@ -166,9 +168,10 @@ class Peers:
                 try:
                     peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     peer_socket.connect((peer_ip, peer_port))
-                    self.peer_connections.append(peer_socket)
+                    with self._lock:
+                        self.peer_connections.append(peer_socket)
+                        self.peer_info[peer_socket] = (peer_ip, peer_port)
                     peer_socket.sendall(f"NEW_PEER_SERVER:{self.port}\n".encode('utf-8'))
-                    self.peer_info[peer_socket] = (peer_ip, peer_port)
                     msg = f"Peer(client)({self.ip}:{self.port}) -> Connected to peer {peer_ip}:{peer_port}"
                     print(msg)
                     log(msg)
@@ -225,7 +228,8 @@ class Peers:
                         try:
                             remote_port = int(line.split(":")[1])
                             remote_ip = peer.getpeername()[0]
-                            self.peer_info[peer] = (remote_ip, remote_port)
+                            with self._lock:
+                                self.peer_info[peer] = (remote_ip, remote_port)
                             handshake_done = True
                             msg = f"Handshake complete with peer {remote_ip}:{remote_port}"
                             print(msg)
@@ -242,7 +246,8 @@ class Peers:
                         peer.sendall("PONG\n".encode('utf-8'))
                         log(f"Sent PONG to {self.peer_info.get(peer, peer.getpeername())}")
                     elif line.startswith("PONG"):
-                        self.ping_tracker[peer] = [time.time(), 0]
+                        with self._lock:
+                            self.ping_tracker[peer] = [time.time(), 0]
                         log(f"Received PONG from {self.peer_info.get(peer, peer.getpeername())}")
                     elif line.startswith("GOSSIP:"):
                         try:
@@ -250,16 +255,20 @@ class Peers:
                         except ValueError:
                             log(f"Failed to parse message hash: {line}")
                             continue
-                        if message_hash not in self.message_hashes:
-                            self.message_hashes.add(message_hash)
-                            for peer_socket in list(self.peer_connections):
-                                if peer_socket != peer:
-                                    thread = threading.Thread(
-                                        target=self.gossip_sender_peer,
-                                        args=(peer_socket, message_hash),
-                                        daemon=True
-                                    )
-                                    thread.start()
+                        with self._lock:
+                            already_seen = message_hash in self.message_hashes
+                            if not already_seen:
+                                self.message_hashes.add(message_hash)
+                                peers_to_notify = [ps for ps in self.peer_connections if ps != peer]
+                            else:
+                                peers_to_notify = []
+                        for peer_socket in peers_to_notify:
+                            thread = threading.Thread(
+                                target=self.gossip_sender_peer,
+                                args=(peer_socket, message_hash),
+                                daemon=True
+                            )
+                            thread.start()
 
     def gossip_sender_all(self):
         for i in range(NUM_MESSAGES):
@@ -267,16 +276,22 @@ class Peers:
                 break
             message = f"{time.strftime('%H:%M:%S')}:{self.ip}:{self.port}:m"
             message_hash = hash(message)
-            if message_hash not in self.message_hashes:
+            with self._lock:
+                already_seen = message_hash in self.message_hashes
+                if not already_seen:
+                    self.message_hashes.add(message_hash)
+                    peers_to_notify = list(self.peer_connections)
+                else:
+                    peers_to_notify = []
+            if not already_seen:
                 log(f"Peer {self.ip}:{self.port} -> Sending gossip hash for first time: {message}")
-                self.message_hashes.add(message_hash)
-                for peer in list(self.peer_connections):
-                    thread = threading.Thread(
-                        target=self.gossip_sender_peer,
-                        args=(peer, message_hash),
-                        daemon=True
-                    )
-                    thread.start()
+            for peer in peers_to_notify:
+                thread = threading.Thread(
+                    target=self.gossip_sender_peer,
+                    args=(peer, message_hash),
+                    daemon=True
+                )
+                thread.start()
             time.sleep(GOSSIP_SEND_INTERVAL)
 
     def gossip_sender_peer(self, peer: socket.socket, message_hash: int):
@@ -299,19 +314,25 @@ class Peers:
         if self.isDead or not self.running_status:
             return
         try:
-            if peer_socket not in self.ping_tracker:
-                self.ping_tracker[peer_socket] = [time.time(), 0]
-            peer_addr = self.peer_info.get(peer_socket, ("Unknown", "Unknown"))
-            if time.time() - self.ping_tracker[peer_socket][0] >= PING_MAX_WAIT:
-                counter = self.ping_tracker[peer_socket][1]
-                self.ping_tracker[peer_socket] = [time.time(), counter + 1]
-                if self.ping_tracker[peer_socket][1] >= 3:
+            with self._lock:
+                if peer_socket not in self.ping_tracker:
+                    self.ping_tracker[peer_socket] = [time.time(), 0]
+                peer_addr = self.peer_info.get(peer_socket, ("Unknown", "Unknown"))
+                elapsed = time.time() - self.ping_tracker[peer_socket][0]
+                miss_count = self.ping_tracker[peer_socket][1]
+
+            if elapsed >= PING_MAX_WAIT:
+                with self._lock:
+                    self.ping_tracker[peer_socket] = [time.time(), miss_count + 1]
+                    new_count = self.ping_tracker[peer_socket][1]
+                if new_count >= 3:
                     msg = f"Peer(client)({self.ip}:{self.port}) -> Peer {peer_addr} is dead"
                     print(msg)
                     log(msg)
-                    if peer_socket in self.peer_connections:
-                        self.peer_connections.remove(peer_socket)
-                    self.peer_list = [p for p in self.peer_list if p[0:2] != peer_addr]
+                    with self._lock:
+                        if peer_socket in self.peer_connections:
+                            self.peer_connections.remove(peer_socket)
+                        self.peer_list = [p for p in self.peer_list if p[0:2] != peer_addr]
                     for seed_socket in self.seed_connections:
                         dead_msg = f"DEAD_NODE:{peer_addr[0]}:{peer_addr[1]}:{time.strftime('%H:%M:%S')}:{self.ip}:{self.port}\n"
                         seed_socket.sendall(dead_msg.encode('utf-8'))
@@ -325,16 +346,19 @@ class Peers:
             if not self.running_status:
                 return
             peer_addr = self.peer_info.get(peer_socket, ("Unknown", "Unknown"))
-            if peer_socket not in self.ping_tracker:
-                self.ping_tracker[peer_socket] = [time.time(), 1]
-            else:
-                self.ping_tracker[peer_socket][1] += 1
-            if self.ping_tracker[peer_socket][1] >= 3:
+            with self._lock:
+                if peer_socket not in self.ping_tracker:
+                    self.ping_tracker[peer_socket] = [time.time(), 1]
+                else:
+                    self.ping_tracker[peer_socket][1] += 1
+                fail_count = self.ping_tracker[peer_socket][1]
+            if fail_count >= 3:
                 msg = f"Peer(client)({self.ip}:{self.port}) -> Peer {peer_addr} dead after ping failures"
                 print(msg)
                 log(msg)
-                if peer_socket in self.peer_connections:
-                    self.peer_connections.remove(peer_socket)
+                with self._lock:
+                    if peer_socket in self.peer_connections:
+                        self.peer_connections.remove(peer_socket)
                 for seed_socket in self.seed_connections:
                     try:
                         dead_msg = f"DEAD_NODE:{peer_addr[0]}:{peer_addr[1]}:{time.strftime('%H:%M:%S')}:{self.ip}:{self.port}\n"
