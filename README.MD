@@ -101,9 +101,9 @@ When a peer opens a connection to another peer, it immediately sends `NEW_PEER_S
 
 ### 5. Gossip propagation
 
-Each peer generates up to `NUM_MESSAGES` (10) gossip messages, one every `GOSSIP_SEND_INTERVAL` (5) seconds. Each message is a string composed of the current timestamp, the peer's IP and port. Its SHA hash is computed and sent to all connected peers as `GOSSIP:<hash>`.
+Each peer generates up to `NUM_MESSAGES` (10) gossip messages, one every `GOSSIP_SEND_INTERVAL` (5) seconds. Each message is a string composed of the current epoch timestamp, the peer's IP and port. Its hash is computed and sent to all connected peers as `GOSSIP:<hash>`.
 
-On receiving a gossip message, a peer checks whether it has already seen that hash. If not, it records the hash and forwards it to all other connected peers (flood with deduplication). This ensures each message is delivered exactly once to every reachable node, regardless of the network topology.
+On receiving a gossip message, a peer checks whether it has already seen that hash. If not, it records the hash and forwards it to all other connected peers (flood with deduplication). This ensures each message is delivered exactly once to every reachable node, regardless of the network topology. Forwarding is handled by a shared thread pool (`ThreadPoolExecutor`, 8 workers) to bound the number of threads spawned under high gossip load.
 
 ### 6. Liveness detection (PING/PONG)
 
@@ -115,7 +115,7 @@ Every `PING_INTERVAL` (3) seconds, each peer sends a `PING` to all of its connec
 
 ### 7. Death simulation
 
-After joining, each peer rolls a random number. With 30% probability, the peer will die at a random time between 30 and 60 seconds. When a peer dies, `isDead` is set to `True`. The gossip and ping sender threads check this flag and stop. The server socket continues accepting connections but no further messages are processed. Live neighbours detect the silence through missed PINGs and report the dead peer to seeds.
+After joining, each peer rolls a random number. With 30% probability, the peer will die at a random time between 30 and 60 seconds. When a peer dies, `isDead` is set to `True` and `close()` is called immediately, which shuts down the server socket and the gossip thread pool. The gossip and ping sender threads check `isDead` and stop. Live neighbours detect the silence through missed PINGs and report the dead peer to seeds.
 
 ---
 
@@ -128,7 +128,8 @@ p2p-network-simulation/
 ├── new_peer.py      # Entry point for a single peer node
 ├── seeds.py         # Seeds class — registry and peer list management
 ├── peers.py         # Peers class — all peer-side logic
-├── log.py           # Thread-safe logging utility
+├── log.py           # Logging utility (wraps Python's logging module)
+├── utils.py         # Shared helpers: get_local_ip, load_seeds_from_config
 │
 ├── config.txt       # Seed node addresses (one ip:port per line)
 ├── OUTPUT.txt       # Generated at runtime — all timestamped log entries
@@ -139,7 +140,8 @@ p2p-network-simulation/
 
 | File | Responsibility |
 |---|---|
-| `log.py` | Writes timestamped entries to `OUTPUT.txt` using a threading lock to prevent interleaved writes |
+| `log.py` | Thin wrapper around Python's `logging` module — writes timestamped entries to `OUTPUT.txt` with thread-safe file handling |
+| `utils.py` | Shared utilities used by multiple modules: `get_local_ip()` and `load_seeds_from_config()` |
 | `seeds.py` | TCP server that registers peers, serves peer lists, tracks degrees, and evicts dead nodes |
 | `main.py` | Reads `config.txt`, creates `Seeds` instances, and provides a CLI to inspect peer lists |
 | `peers.py` | Full peer lifecycle: creation, seed connection, peer discovery, gossip, liveness, death |
@@ -264,7 +266,7 @@ All messages are plain UTF-8 text terminated with a newline (`\n`). Both seeds a
 
 | Message | Format | Description |
 |---|---|---|
-| Peer list response | `<ip>:<port>:<degree>\n` (one per line) | Sent synchronously in response to `REQUEST_PEER_LIST`. The peer reads this as a single `recv()` call. |
+| Peer list response | `<ip>:<port>:<degree>\n` (one per line) | Sent synchronously in response to `REQUEST_PEER_LIST`. The peer accumulates chunks until the trailing newline is received. |
 
 ### Peer → Peer messages
 
@@ -328,12 +330,10 @@ Example entries:
 
 ## Known Limitations
 
-- **Single `recv()` for peer list** — `request_peer_lists()` reads the seed's response in a single `recv(1024)` call. If the peer list is large enough to exceed 1024 bytes, the response will be truncated. For simulations with many peers, increase the buffer size or switch to a length-prefixed or newline-terminated streaming read.
-
 - **No reconnection logic** — if a peer loses its connection to a seed or a neighbour, it does not attempt to reconnect. The peer continues operating with its remaining connections until it or they die.
 
-- **Death is silent** — when a peer's `isDead` flag is set, it stops sending PINGs and gossip but does not notify seeds or neighbours directly. Detection relies entirely on the PING/PONG timeout mechanism, which means there is a detection delay of up to `PING_INTERVAL × 3 + PING_MAX_WAIT` seconds (approximately 14 seconds with default settings).
+- **Death detection delay** — when a peer dies, its socket and gossip pool are shut down immediately, but neighbours are not notified directly. Detection relies on the PING/PONG timeout mechanism, which means there is a detection delay of up to `PING_INTERVAL × 3 + PING_MAX_WAIT` seconds (approximately 14 seconds with default settings).
 
 - **Local network only** — IP discovery uses a UDP trick (`connect` to `8.8.8.8:80`) to find the outbound interface IP. This works correctly on a LAN. It will not work across NAT or the public internet without additional configuration.
 
-- **Thread-per-connection model** — every peer connection spawns a new thread. For large-scale simulations with hundreds of peers, this approach does not scale. An event-loop model (`asyncio` or `selectors`) would be more appropriate.
+- **Thread-per-connection model** — every peer connection spawns a dedicated listener thread. Gossip forwarding uses a bounded thread pool (8 workers), but for large-scale simulations with hundreds of peers, an event-loop model (`asyncio` or `selectors`) would be more appropriate.
