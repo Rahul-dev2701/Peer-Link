@@ -298,12 +298,27 @@ class Peers:
             if self.running_status:
                 print(f"Peer({self.ip}:{self.port}) -> Error sending gossip: {e}")
 
+    def _remove_dead_peer(self, peer_socket: socket.socket, peer_addr: tuple):
+        with self._lock:
+            if peer_socket in self.peer_connections:
+                self.peer_connections.remove(peer_socket)
+            self.peer_list = [p for p in self.peer_list if p[0:2] != peer_addr]
+        dead_msg = f"DEAD_NODE:{peer_addr[0]}:{peer_addr[1]}:{time.strftime('%H:%M:%S')}:{self.ip}:{self.port}\n"
+        for seed_socket in self.seed_connections:
+            try:
+                seed_socket.sendall(dead_msg.encode('utf-8'))
+            except Exception:
+                pass
+        try:
+            peer_socket.close()
+        except Exception:
+            pass
+
     def ping_sender(self):
         while self.running_status and not self.isDead:
             for peer_socket in list(self.peer_connections):
                 self.ping_sender_peer(peer_socket)
             time.sleep(PING_INTERVAL)
-
 
     def ping_sender_peer(self, peer_socket: socket.socket):
         if self.isDead or not self.running_status:
@@ -324,14 +339,7 @@ class Peers:
                     msg = f"Peer(client)({self.ip}:{self.port}) -> Peer {peer_addr} is dead"
                     print(msg)
                     log(msg)
-                    with self._lock:
-                        if peer_socket in self.peer_connections:
-                            self.peer_connections.remove(peer_socket)
-                        self.peer_list = [p for p in self.peer_list if p[0:2] != peer_addr]
-                    for seed_socket in self.seed_connections:
-                        dead_msg = f"DEAD_NODE:{peer_addr[0]}:{peer_addr[1]}:{time.strftime('%H:%M:%S')}:{self.ip}:{self.port}\n"
-                        seed_socket.sendall(dead_msg.encode('utf-8'))
-                    peer_socket.close()
+                    self._remove_dead_peer(peer_socket, peer_addr)
                     return
             peer_socket.sendall("PING\n".encode('utf-8'))
             msg = f"Peer(client)({self.ip}:{self.port}) -> Sent PING to {peer_addr}"
@@ -351,19 +359,7 @@ class Peers:
                 msg = f"Peer(client)({self.ip}:{self.port}) -> Peer {peer_addr} dead after ping failures"
                 print(msg)
                 log(msg)
-                with self._lock:
-                    if peer_socket in self.peer_connections:
-                        self.peer_connections.remove(peer_socket)
-                for seed_socket in self.seed_connections:
-                    try:
-                        dead_msg = f"DEAD_NODE:{peer_addr[0]}:{peer_addr[1]}:{time.strftime('%H:%M:%S')}:{self.ip}:{self.port}\n"
-                        seed_socket.sendall(dead_msg.encode('utf-8'))
-                    except Exception:
-                        pass
-                try:
-                    peer_socket.close()
-                except Exception:
-                    pass
+                self._remove_dead_peer(peer_socket, peer_addr)
 
 
     def simulate_death(self):
