@@ -2,6 +2,7 @@ import random
 import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import List
 import time
 from log import log
@@ -11,6 +12,12 @@ PING_INTERVAL = 3
 PING_MAX_WAIT = 5
 GOSSIP_SEND_INTERVAL = 5
 NUM_MESSAGES = 10
+
+
+@dataclass
+class PingState:
+    last_seen: float
+    miss_count: int
 
 
 class Peers:
@@ -151,7 +158,12 @@ class Peers:
             log(msg)
 
     def connect_to_peers(self):
-        for peer in set(self.peer_list):
+        unique_peers = {}
+        for p in self.peer_list:
+            key = (p[0], p[1])
+            if key not in unique_peers or p[2] > unique_peers[key][2]:
+                unique_peers[key] = p
+        for peer in unique_peers.values():
             peer_ip, peer_port, peer_degree = peer
             if peer_ip == self.ip and peer_port == self.port:
                 continue
@@ -245,7 +257,7 @@ class Peers:
                         log(f"Sent PONG to {self.peer_info.get(peer, peer.getpeername())}")
                     elif line.startswith("PONG"):
                         with self._lock:
-                            self.ping_tracker[peer] = [time.time(), 0]
+                            self.ping_tracker[peer] = PingState(last_seen=time.time(), miss_count=0)
                         log(f"Received PONG from {self.peer_info.get(peer, peer.getpeername())}")
                     elif line.startswith("GOSSIP:"):
                         try:
@@ -319,15 +331,15 @@ class Peers:
         try:
             with self._lock:
                 if peer_socket not in self.ping_tracker:
-                    self.ping_tracker[peer_socket] = [time.time(), 0]
+                    self.ping_tracker[peer_socket] = PingState(last_seen=time.time(), miss_count=0)
                 peer_addr = self.peer_info.get(peer_socket, ("Unknown", "Unknown"))
-                elapsed = time.time() - self.ping_tracker[peer_socket][0]
-                miss_count = self.ping_tracker[peer_socket][1]
+                elapsed = time.time() - self.ping_tracker[peer_socket].last_seen
+                miss_count = self.ping_tracker[peer_socket].miss_count
 
             if elapsed >= PING_MAX_WAIT:
                 with self._lock:
-                    self.ping_tracker[peer_socket] = [time.time(), miss_count + 1]
-                    new_count = self.ping_tracker[peer_socket][1]
+                    self.ping_tracker[peer_socket] = PingState(last_seen=time.time(), miss_count=miss_count + 1)
+                    new_count = self.ping_tracker[peer_socket].miss_count
                 if new_count >= 3:
                     msg = f"Peer(client)({self.ip}:{self.port}) -> Peer {peer_addr} is dead"
                     print(msg)
@@ -344,16 +356,15 @@ class Peers:
             peer_addr = self.peer_info.get(peer_socket, ("Unknown", "Unknown"))
             with self._lock:
                 if peer_socket not in self.ping_tracker:
-                    self.ping_tracker[peer_socket] = [time.time(), 1]
+                    self.ping_tracker[peer_socket] = PingState(last_seen=time.time(), miss_count=1)
                 else:
-                    self.ping_tracker[peer_socket][1] += 1
-                fail_count = self.ping_tracker[peer_socket][1]
+                    self.ping_tracker[peer_socket].miss_count += 1
+                fail_count = self.ping_tracker[peer_socket].miss_count
             if fail_count >= 3:
                 msg = f"Peer(client)({self.ip}:{self.port}) -> Peer {peer_addr} dead after ping failures"
                 print(msg)
                 log(msg)
                 self._remove_dead_peer(peer_socket, peer_addr)
-
 
     def simulate_death(self):
         chance_to_die = 0.3
