@@ -1,6 +1,6 @@
 import socket
 import threading
-from typing import List
+from typing import Dict, List, Tuple
 from log import log
 
 
@@ -25,7 +25,7 @@ class Seeds:
         self.port = int(port)
         self.server_socket = None
         self.seed_sockets: List[socket.socket] = []
-        self.peer_list = []
+        self.peer_list: Dict[Tuple[str, int], int] = {}  # (ip, port) -> degree
         self.running_status = True
 
     def creation(self):
@@ -82,9 +82,9 @@ class Seeds:
                             server_port = int(line.split(":")[1])
                         except ValueError:
                             continue
-                        peer_entry = (address[0], server_port, 1)
-                        if not any(p[0] == address[0] and p[1] == server_port for p in self.peer_list):
-                            self.peer_list.append(peer_entry)
+                        key = (address[0], server_port)
+                        if key not in self.peer_list:
+                            self.peer_list[key] = 1
                         msg = f"Seed({self.ip}:{self.port}) -> Peer {address[0]}:{server_port} registered with degree 1"
                         print(msg)
                         log(msg)
@@ -92,7 +92,8 @@ class Seeds:
                             self.seed_sockets.append(connection)
                     if line.startswith("REQUEST_PEER_LIST:"):
                         peer_list_str = '\n'.join(
-                            [f"{ip}:{port}:{degree}" for ip, port, degree in self.peer_list]
+                            f"{ip}:{port}:{degree}"
+                            for (ip, port), degree in self.peer_list.items()
                         ) + "\n"
                         connection.sendall(peer_list_str.encode('utf-8'))
                     if line.startswith("DEAD_NODE:"):
@@ -103,13 +104,8 @@ class Seeds:
                                 dead_port = int(parts[2])
                             except ValueError:
                                 continue
-                            before = len(self.peer_list)
-                            self.peer_list = [
-                                p for p in self.peer_list
-                                if not (p[0] == dead_ip and p[1] == dead_port)
-                            ]
-                            after = len(self.peer_list)
-                            if before != after:
+                            removed = self.peer_list.pop((dead_ip, dead_port), None)
+                            if removed is not None:
                                 msg = f"Seed({self.ip}:{self.port}) -> Removed dead peer {dead_ip}:{dead_port}"
                             else:
                                 msg = f"Seed({self.ip}:{self.port}) -> Dead peer {dead_ip}:{dead_port} not found"
@@ -126,17 +122,8 @@ class Seeds:
                         except ValueError:
                             continue
                         connected_peers_str = parts[4] if len(parts) == 5 else ""
-                        existing = next(
-                            (p for p in self.peer_list if p[0] == new_ip and p[1] == new_port), None
-                        )
-                        if existing:
-                            updated_degree = max(existing[2], new_degree)
-                            self.peer_list = [
-                                (p[0], p[1], updated_degree) if (p[0] == new_ip and p[1] == new_port) else p
-                                for p in self.peer_list
-                            ]
-                        else:
-                            self.peer_list.append((new_ip, new_port, new_degree))
+                        key = (new_ip, new_port)
+                        self.peer_list[key] = max(self.peer_list.get(key, 0), new_degree)
                         if connected_peers_str:
                             for cp in connected_peers_str.split(","):
                                 if not cp.strip():
@@ -146,18 +133,8 @@ class Seeds:
                                     cp_port = int(cp_port_str)
                                 except ValueError:
                                     continue
-                                found = False
-                                for p in self.peer_list:
-                                    if p[0] == cp_ip and p[1] == cp_port:
-                                        new_deg = p[2] + 1
-                                        self.peer_list = [
-                                            (p[0], p[1], new_deg) if (p[0] == cp_ip and p[1] == cp_port) else p
-                                            for p in self.peer_list
-                                        ]
-                                        found = True
-                                        break
-                                if not found:
-                                    self.peer_list.append((cp_ip, cp_port, 1))
+                                cp_key = (cp_ip, cp_port)
+                                self.peer_list[cp_key] = self.peer_list.get(cp_key, 0) + 1
                         msg = f"Seed({self.ip}:{self.port}) -> CONNECTION_UPDATE from {new_ip}:{new_port}. List: {self.peer_list}"
                         print(msg)
                         log(msg)

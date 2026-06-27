@@ -23,8 +23,8 @@ def command_listener():
                 print("----------- Peer Lists from All Seeds ----------------")
                 for seed in seeds:
                     print(f"Seed {seed.ip}:{seed.port} peer list:")
-                    for peer in seed.peer_list:
-                        print(f"  {peer[0]}:{peer[1]} degree: {peer[2]}")
+                    for (ip, port), degree in seed.peer_list.items():
+                        print(f"  {ip}:{port} degree: {degree}")
                 print("------------------ End of Peer Lists ----------------")
             elif cmd == "exit":
                 print("\nExiting...")
