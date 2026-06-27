@@ -71,8 +71,7 @@ class Seeds:
             try:
                 data = connection.recv(1024)
                 if not data:
-                    buffer = ""
-                    continue
+                    break
                 buffer += data.decode('utf-8')
                 while "\n" in buffer:
                     line, buffer = buffer.split("\n", 1)
