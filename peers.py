@@ -4,23 +4,12 @@ import threading
 from typing import List
 import time
 from log import log
+from utils import get_local_ip
 
 PING_INTERVAL = 3
 PING_MAX_WAIT = 5
 GOSSIP_SEND_INTERVAL = 5
 NUM_MESSAGES = 10
-
-
-def get_local_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(('8.8.8.8', 80))
-        ip = s.getsockname()[0]
-    except Exception:
-        ip = '127.0.0.1'
-    finally:
-        s.close()
-    return ip
 
 
 class Peers:

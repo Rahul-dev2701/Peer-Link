@@ -3,6 +3,7 @@ import time
 import signal
 from peers import Peers
 from log import log
+from utils import load_seeds_from_config
 
 seeds_connection = []
 
@@ -28,16 +29,7 @@ if __name__ == "__main__":
         log(msg)
         sys.exit(1)
 
-    with open("config.txt", "r") as config_file:
-        config = config_file.readlines()
-    for line in config:
-        if line.count(':') != 1 or line.count('.') != 3:
-            continue
-        if line.strip() == "":
-            continue
-        line = line.strip()
-        ip, port = line.split(':')
-        seeds_connection.append((ip, int(port)))
+    seeds_connection = load_seeds_from_config()
 
     peer_instance = Peers(None, assigned_port)
     peer_instance.creation()

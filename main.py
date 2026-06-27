@@ -4,6 +4,7 @@ import time
 import threading
 from seeds import Seeds
 from log import log
+from utils import load_seeds_from_config
 
 seeds = []
 
@@ -39,17 +40,8 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    with open("config.txt", "r") as config_file:
-        config = config_file.readlines()
-
-    for line in config:
-        if line.count(':') != 1 or line.count('.') != 3:
-            continue
-        if line.strip() == "":
-            continue
-        line = line.strip()
-        ip, port = line.split(':')
-        seed = Seeds(ip, int(port))
+    for ip, port in load_seeds_from_config():
+        seed = Seeds(ip, port)
         if seed.creation():
             seeds.append(seed)
 
