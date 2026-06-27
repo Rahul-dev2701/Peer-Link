@@ -267,7 +267,7 @@ class Peers:
         for i in range(NUM_MESSAGES):
             if not self.running_status or self.isDead:
                 break
-            message = f"{time.strftime('%H:%M:%S')}:{self.ip}:{self.port}:m"
+            message = f"{time.time()}:{self.ip}:{self.port}:m"
             message_hash = hash(message)
             with self._lock:
                 already_seen = message_hash in self.message_hashes
