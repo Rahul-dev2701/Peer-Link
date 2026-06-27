@@ -1,6 +1,7 @@
 import random
 import socket
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import List
 import time
 from log import log
@@ -32,6 +33,7 @@ class Peers:
         self.ping_tracker = {}
         self.peer_info = {}
         self._lock = threading.Lock()
+        self._gossip_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gossip")
 
     def creation(self):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -137,6 +139,7 @@ class Peers:
 
     def close(self):
         self.running_status = False
+        self._gossip_pool.shutdown(wait=False)
         if self.server_socket:
             try:
                 self.server_socket.shutdown(socket.SHUT_RDWR)
@@ -258,12 +261,7 @@ class Peers:
                             else:
                                 peers_to_notify = []
                         for peer_socket in peers_to_notify:
-                            thread = threading.Thread(
-                                target=self.gossip_sender_peer,
-                                args=(peer_socket, message_hash),
-                                daemon=True
-                            )
-                            thread.start()
+                            self._gossip_pool.submit(self.gossip_sender_peer, peer_socket, message_hash)
 
     def gossip_sender_all(self):
         for i in range(NUM_MESSAGES):
@@ -281,12 +279,7 @@ class Peers:
             if not already_seen:
                 log(f"Peer {self.ip}:{self.port} -> Sending gossip hash for first time: {message}")
             for peer in peers_to_notify:
-                thread = threading.Thread(
-                    target=self.gossip_sender_peer,
-                    args=(peer, message_hash),
-                    daemon=True
-                )
-                thread.start()
+                self._gossip_pool.submit(self.gossip_sender_peer, peer, message_hash)
             time.sleep(GOSSIP_SEND_INTERVAL)
 
     def gossip_sender_peer(self, peer: socket.socket, message_hash: int):
