@@ -261,7 +261,7 @@ class Peers:
                                     )
                                     thread.start()
 
-def gossip_sender_all(self):
+    def gossip_sender_all(self):
         for i in range(NUM_MESSAGES):
             if not self.running_status or self.isDead:
                 break
@@ -279,23 +279,23 @@ def gossip_sender_all(self):
                     thread.start()
             time.sleep(GOSSIP_SEND_INTERVAL)
 
-def gossip_sender_peer(self, peer: socket.socket, message_hash: int):
-    try:
-        peer.sendall(f"GOSSIP:{message_hash}\n".encode('utf-8'))
-        msg = f"Peer({self.ip}:{self.port}) -> Sent GOSSIP:{message_hash}"
-        print(msg)
-    except Exception as e:
-        if self.running_status:
-            print(f"Peer({self.ip}:{self.port}) -> Error sending gossip: {e}")
+    def gossip_sender_peer(self, peer: socket.socket, message_hash: int):
+        try:
+            peer.sendall(f"GOSSIP:{message_hash}\n".encode('utf-8'))
+            msg = f"Peer({self.ip}:{self.port}) -> Sent GOSSIP:{message_hash}"
+            print(msg)
+        except Exception as e:
+            if self.running_status:
+                print(f"Peer({self.ip}:{self.port}) -> Error sending gossip: {e}")
 
-def ping_sender(self):
+    def ping_sender(self):
         while self.running_status and not self.isDead:
             for peer_socket in list(self.peer_connections):
                 self.ping_sender_peer(peer_socket)
             time.sleep(PING_INTERVAL)
 
 
-def ping_sender_peer(self, peer_socket: socket.socket):
+    def ping_sender_peer(self, peer_socket: socket.socket):
         if self.isDead or not self.running_status:
             return
         try:
@@ -347,7 +347,7 @@ def ping_sender_peer(self, peer_socket: socket.socket):
                     pass
 
 
-def simulate_death(self):
+    def simulate_death(self):
         chance_to_die = 0.3
         if random.random() < chance_to_die:
             death_time = random.uniform(30, 60)
