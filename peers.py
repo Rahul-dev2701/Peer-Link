@@ -364,6 +364,7 @@ class Peers:
             msg = f"Peer {self.ip}:{self.port} has died (simulated)."
             print(msg)
             log(msg)
+            self.close()
         else:
             msg = f"Peer {self.ip}:{self.port} remains alive (simulation)."
             print(msg)
