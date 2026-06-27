@@ -74,7 +74,7 @@ Seed nodes and peer nodes run as separate processes. Seed processes are started 
 
 ### 2. Peer joins the network
 
-When `new_peer.py` is run with a port number, it creates a `Peers` instance and calls `creation()` to open its own TCP server socket. It then calls `connect()`, which performs the full join sequence:
+When `new_peer.py` is run with a port number, it creates a `Peers` instance and calls `creation()` to open its own TCP server socket bound to `0.0.0.0` (all interfaces). It then calls `connect()`, which performs the full join sequence:
 
 1. Randomly selects `(n/2) + 1` seeds from `config.txt` to connect to.
 2. Sends `PEER_SERVER:<port>` to each selected seed to register itself.
@@ -334,6 +334,6 @@ Example entries:
 
 - **Death detection delay** — when a peer dies, its socket and gossip pool are shut down immediately, but neighbours are not notified directly. Detection relies on the PING/PONG timeout mechanism, which means there is a detection delay of up to `PING_INTERVAL × 3 + PING_MAX_WAIT` seconds (approximately 14 seconds with default settings).
 
-- **Local network only** — IP discovery uses a UDP trick (`connect` to `8.8.8.8:80`) to find the outbound interface IP. This works correctly on a LAN. It will not work across NAT or the public internet without additional configuration.
+- **Local network only** — IP discovery uses a UDP trick (`connect` to `8.8.8.8:80`) to find the outbound interface IP for identification and logging. The peer server socket binds to `0.0.0.0` so it accepts connections on all interfaces, which means both localhost simulations and LAN deployments work correctly. It will not work across NAT or the public internet without additional configuration.
 
 - **Thread-per-connection model** — every peer connection spawns a dedicated listener thread. Gossip forwarding uses a bounded thread pool (8 workers), but for large-scale simulations with hundreds of peers, an event-loop model (`asyncio` or `selectors`) would be more appropriate.
