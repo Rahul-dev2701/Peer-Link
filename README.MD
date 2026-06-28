@@ -1,8 +1,12 @@
 # Peer-to-Peer Network Simulation
 
+## Note:
+This repository is forked from the original group project.
+Original repo: [Peer-Link](https://github.com/RounakChoudhary/Peer-Link)
+
 A simulation of a decentralized peer-to-peer network built entirely in Python using raw TCP sockets and threads — no third-party networking libraries. The project demonstrates core distributed systems concepts: seed-based peer discovery, preferential attachment for topology formation, gossip-based message propagation, and PING/PONG liveness detection with automatic dead peer eviction.
 
-Built for learning purposes.
+Built for learning purposes. 
 
 ---
 
